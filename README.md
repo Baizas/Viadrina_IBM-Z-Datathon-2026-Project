@@ -138,6 +138,17 @@ for all 33,654 validation transactions and the same risk tier for 2,276 of 2,276
 | `POST /explain` | tier, amount, reasons → Granite analyst note (about 9 s on CPU, so it is a separate call) |
 | `POST /feedback` | analyst label (`fraud` / `not_fraud`) for a scored transaction, stored for the next retraining |
 | `GET /health` | models loaded, cards in memory |
+| `GET /` | **analyst page** (see below) |
+
+### Analyst page
+
+Open `http://<VM IP>:5000` in any browser; nothing to install. An analyst picks a transaction (four real
+transactions from the validation period, or a custom one), clicks **Score**, and sees the tier, the risk score
+against the alert thresholds, the reasons, each model's score and the scoring time. **Write note with IBM Granite**
+adds the fact-checked analyst note, and **Confirm fraud / Not fraud** stores the verdict for the next retraining.
+The example scores are deterministic: before scoring, the page rebuilds that card's history from the data, so the
+$267.66 payment always returns RED 0.9485 with the reasons shown below, and the payment in Rome (November 2017, the new
+pattern) shows what the model trained up to 2015 misses.
 
 Run on the LinuxONE VM (after the notebook has saved the models to `/home/linux1/shared/models/`):
 
@@ -187,6 +198,7 @@ curl -X POST http://localhost:5000/score -H "Content-Type: application/json" -d 
 Viadrina_Fraud_Detector.ipynb   full pipeline with outputs: data, features, models, reasons, Granite, replay, LinuxONE proof, test
 Viadrina_Fraud_Detector.py      the notebook as a script
 api/app.py                      real-time scoring API (Flask)
+api/analyst.html                analyst page served by the API at /
 api/Dockerfile                  container for the API, based on IBM's LinuxONE AI image
 docs/adaptive-chart.png         static vs adaptive chart
 docs/linuxone_proof.json        accelerator, latency and ONNX numbers

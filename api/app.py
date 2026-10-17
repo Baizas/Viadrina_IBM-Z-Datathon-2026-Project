@@ -4,6 +4,8 @@ POST /score     one raw transaction (same fields as transactions_history.csv) ->
 POST /explain   tier + amount + reasons -> one analyst sentence from IBM Granite (fact-checked)
 POST /feedback  analyst label for a scored transaction (appended to feedback.jsonl for the next retrain)
 GET  /health    status of models and in-memory card history
+GET  /          analyst page (score example or custom transactions, Granite note, analyst verdict)
+GET  /demo/examples, POST /demo/score   real validation transactions for the analyst page
 
 Features are computed here, per card, with the same definitions as the training notebook, so a client
 sends the raw transaction and never pre-computed features.
@@ -21,7 +23,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import xgboost as xgb
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 MODEL_DIR = os.environ.get('MODEL_DIR', '/home/ibm-user/shared/models/')
 DATA_PATH = os.environ.get('DATA_PATH', '/home/ibm-user/transactions_history.csv')
@@ -221,7 +223,7 @@ def score(tx):
 # ---------- start-up: load card history up to HISTORY_END ----------
 
 def load_history():
-    global MCC_FRAUD_RATE, BASE_FRAUD_RATE
+    global MCC_FRAUD_RATE, BASE_FRAUD_RATE, ALL_TX
     df = pd.read_csv(DATA_PATH)
     df['ts'] = pd.to_datetime(dict(year=df['Year'], month=df['Month'], day=df['Day'],
                                    hour=df['Time'].str.slice(0, 2).astype(int),
@@ -231,13 +233,64 @@ def load_history():
     train = df[df['Year'] <= 2015]                                # same training period as the notebook
     MCC_FRAUD_RATE = train.groupby('MCC')['is_fraud'].mean().to_dict()
     BASE_FRAUD_RATE = float(train['is_fraud'].mean())
-    hist = df[df['ts'] < HISTORY_END].sort_values(['User', 'Card', 'ts', 'amount'])
+    ALL_TX = df.sort_values(['User', 'Card', 'ts', 'amount']).reset_index(drop=True)   # used by the demo
+    hist = ALL_TX[ALL_TX['ts'] < HISTORY_END]
     for tx in hist.to_dict('records'):
         build_features(tx)
     return len(hist)
 
 
 HISTORY_ROWS = load_history()
+
+
+# ---------- analyst page demo: real transactions from the validation period (2016-2017) ----------
+
+TX_FIELDS = ['User', 'Card', 'Year', 'Month', 'Day', 'Time', 'Amount', 'Use Chip', 'Merchant Name', 'Merchant City',
+             'Merchant State', 'Zip', 'MCC', 'Errors?']
+DEMO_SPECS = [
+    ('fraud-online', 13, 0, '2016-07-24 10:41', '$267.66',
+     'Online payment, July 2016', 'Confirmed fraud: a burst of online payments on this card.'),
+    ('fraud-refund', 5, 0, '2016-04-05 15:16', '$-471.00',
+     'Online refund, April 2016', 'Confirmed fraud: a large refund minutes after other online payments.'),
+    ('normal-card13', 13, 0, '2016-07-22 15:29', '$15.58',
+     'Chip purchase in Traverse City, July 2016', 'Normal transaction on the same card, two days before the fraud.'),
+    ('new-pattern-italy', 3, 1, '2017-11-19 12:07', '$510.24',
+     'Chip purchase in Rome, Nov 2017', 'Confirmed fraud from the new pattern (merchants in Italy) that started in late '
+                                        '2017. The deployed model was trained on data up to 2015; the stream replay shows '
+                                        'how quarterly retraining learns this pattern.'),
+]
+
+
+def clean(value):
+    if isinstance(value, float) and np.isnan(value):
+        return None
+    return value.item() if hasattr(value, 'item') else value
+
+
+def find_demo_tx(user, card, when, amount):
+    rows = ALL_TX[(ALL_TX['User'] == user) & (ALL_TX['Card'] == card) & (ALL_TX['ts'] == pd.Timestamp(when))]
+    if amount is not None:
+        rows = rows[rows['Amount'] == amount]
+    if rows.empty:
+        return None
+    return {k: clean(v) for k, v in rows.iloc[0][TX_FIELDS].to_dict().items()}
+
+
+DEMOS = []
+for _id, _user, _card, _when, _amount, _label, _desc in DEMO_SPECS:
+    _tx = find_demo_tx(_user, _card, _when, _amount)
+    if _tx is not None:
+        DEMOS.append({'id': _id, 'label': _label, 'description': _desc, 'transaction': _tx})
+
+
+def replay_card_until(user, card, until):
+    """Rebuild one card's in-memory history from the data, up to (not including) `until`, so a demo transaction is
+    scored exactly as it would have been in production, however often the demo is repeated."""
+    rows = ALL_TX[(ALL_TX['User'] == user) & (ALL_TX['Card'] == card) & (ALL_TX['ts'] < until)]
+    cards[(user, card)] = CardState()
+    for tx in rows.to_dict('records'):
+        build_features(tx)
+    return len(rows)
 
 
 # ---------- Granite (loaded on first use; several seconds per note, so it is a separate call) ----------
@@ -318,7 +371,8 @@ REQUIRED = ['User', 'Card', 'Year', 'Month', 'Day', 'Time', 'Amount', 'Use Chip'
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok', 'models': ['xgboost', 'tf_dense', 'lstm'], 'cards_in_memory': len(cards),
-                    'history_rows_loaded': HISTORY_ROWS, 'history_end': str(HISTORY_END.date())})
+                    'history_rows_loaded': HISTORY_ROWS, 'history_end': str(HISTORY_END.date()),
+                    'red_thr': CFG['red_thr'], 'yellow_thr': CFG['yellow_thr']})
 
 
 @app.route('/score', methods=['POST'])
@@ -356,6 +410,33 @@ def feedback_endpoint():
         fh.write(json.dumps({'transaction_id': body['transaction_id'], 'label': body['label'],
                              'received': pd.Timestamp.now().isoformat()}) + '\n')
     return jsonify({'stored': True})
+
+
+@app.route('/', methods=['GET'])
+def analyst_page():
+    return send_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'analyst.html'))
+
+
+@app.route('/demo/examples', methods=['GET'])
+def demo_examples():
+    return jsonify(DEMOS)
+
+
+@app.route('/demo/score', methods=['POST'])
+def demo_score():
+    body = request.get_json(silent=True) or {}
+    demo = next((d for d in DEMOS if d['id'] == body.get('id')), None)
+    if demo is None:
+        return jsonify({'error': f"Unknown example. Choose one of {[d['id'] for d in DEMOS]}."}), 400
+    tx = demo['transaction']
+    when = pd.Timestamp(year=tx['Year'], month=tx['Month'], day=tx['Day'],
+                        hour=int(tx['Time'][:2]), minute=int(tx['Time'][3:]))
+    with state_lock:
+        replayed = replay_card_until(tx['User'], tx['Card'], when)
+    result = score(tx)
+    result['history_transactions_replayed'] = replayed
+    result['transaction'] = tx
+    return jsonify(result)
 
 
 if __name__ == '__main__':
