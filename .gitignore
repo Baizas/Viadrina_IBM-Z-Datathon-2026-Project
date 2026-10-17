@@ -1,0 +1,10 @@
+.ipynb_checkpoints/
+__pycache__/
+*.csv
+*.gguf
+models/
+*.keras
+*.onnx
+*.joblib
+feedback.jsonl
+repo_dump.txt

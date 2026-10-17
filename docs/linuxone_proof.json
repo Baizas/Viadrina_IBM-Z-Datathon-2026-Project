@@ -1,0 +1,14 @@
+{
+  "cpu_has_nnpa": true,
+  "machine": "s390x",
+  "zdnn_plugin_version": "2.3.0",
+  "zdnn_kernels_file": "/opt/venv/lib/python3.12/site-packages/tensorflow/core/kernels/_z_ops.so",
+  "zdnn_kernels_loaded_in_process": true,
+  "tensorflow_version": "2.18.1",
+  "tf_dense_batch1000_ms": 1.9981494915555231,
+  "lstm_batch1000_ms": 31.372682999062818,
+  "single_tx_latency_ms_median": 24.63662749505602,
+  "single_tx_latency_ms_p95": 25.95135309456964,
+  "onnx_tf_dense_bytes": 24194,
+  "onnx_lstm_bytes": 64855
+}
