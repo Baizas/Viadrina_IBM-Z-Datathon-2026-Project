@@ -6,6 +6,10 @@ Credit card fraud changes faster than rule-based systems can follow. Our system 
 with three models running on IBM LinuxONE, explains each alert in plain language, keeps alert volume within a fixed
 analyst budget, and retrains as confirmed fraud labels arrive, so it recovers when a new fraud pattern appears.
 
+**▶ Live demo: [http://148.100.108.185:5000](http://148.100.108.185:5000)**, the analyst page running on our IBM LinuxONE
+VM. Open it in any browser, pick a transaction and click **Score**. It is available while our LinuxONE Community
+Cloud VM is running; if it does not respond, the video shows the same demo.
+
 ## Results at a glance
 
 | What | Result |
@@ -142,7 +146,8 @@ for all 33,654 validation transactions and the same risk tier for 2,276 of 2,276
 
 ### Analyst page
 
-Open `http://<VM IP>:5000` in any browser; nothing to install. An analyst picks a transaction (four real
+Open [http://148.100.108.185:5000](http://148.100.108.185:5000) (our VM; on your own VM, `http://<VM IP>:5000`) in any
+browser; nothing to install. An analyst picks a transaction (four real
 transactions from the validation period, or a custom one), clicks **Score**, and sees the tier, the risk score
 against the alert thresholds, the reasons, each model's score and the scoring time. **Write note with IBM Granite**
 adds the fact-checked analyst note, and **Confirm fraud / Not fraud** stores the verdict for the next retraining.
